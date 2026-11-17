@@ -33,8 +33,24 @@ def integrity_check(pr: dict, base: dict, spec: dict, base_spec: dict | None = N
         including dropping no_significant_drop)
       - an item's slice tags in PR rows differ from the baseline's (relabelling an item out of a
         slice hides its regression from the slice gate)"""
-    # TODO M7
-    return []
+    from lab9.integrity import finite, ratchet, validate_report
+
+    problems = ratchet(spec, base_spec)
+    for rule in [m.get("threshold") or {} for m in spec.get("metrics", [])] + spec.get("slices", []):
+        for key in ("min", "max", "max_increase"):
+            if key in rule and (isinstance(rule[key], bool) or not finite(rule[key])):
+                problems.append(f"invalid/non-finite policy threshold {key}")
+    pr_errors, pr_rows = validate_report(pr, spec, "PR")
+    base_errors, base_rows = validate_report(base, spec, "baseline")
+    problems.extend(pr_errors + base_errors)
+    if pr_errors or base_errors:
+        return problems
+    if set(pr_rows) != set(base_rows):
+        problems.append("PR trial (item, seed) set differs from baseline")
+    for key in pr_rows.keys() & base_rows.keys():
+        if set(pr_rows[key].get("slices", [])) != set(base_rows[key].get("slices", [])):
+            problems.append(f"slice tags differ from baseline for {key[0]}@{key[1]}")
+    return problems
 
 
 def slice_check(pr: dict, base: dict, spec: dict) -> tuple[list[str], list[str]]:
@@ -44,16 +60,39 @@ def slice_check(pr: dict, base: dict, spec: dict) -> tuple[list[str], list[str]]
       - fail if below "min", or if no_significant_drop and the paired CI over the slice's items
         lies entirely below 0
     Return (blocked ids like "slice:money_movement/pass_rate", report lines)."""
-    # TODO M5
-    return [], []
+    blocked, lines = [], []
+    bs = spec.get("bootstrap", {})
+    for definition in spec.get("slices", []):
+        name, metric = definition["name"], definition["metric"]
+        identity = f"slice:{name}/{metric}"
+        current, previous = per_item(pr, metric, name), per_item(base, metric, name)
+        note, failed = "", False
+        value = sum(current.values()) / len(current) if current else None
+        if not current or set(current) != set(previous):
+            failed, note = True, "missing or unpaired slice items"
+        else:
+            if "min" in definition and value < definition["min"]:
+                failed = True
+            if definition.get("no_significant_drop"):
+                keys = sorted(current)
+                delta, lo, hi = stats.paired_bootstrap([current[k] for k in keys], [previous[k] for k in keys],
+                    n_resamples=bs.get("n_resamples", 1000), rng=bs.get("rng", 2027),
+                    confidence=bs.get("confidence", 0.95))
+                failed |= hi < 0
+                note = f"Δ {delta:+.3f} CI [{lo:+.3f}, {hi:+.3f}]"
+        if failed and definition.get("blocking"):
+            blocked.append(identity)
+        verdict = "BLOCK" if failed and definition.get("blocking") else "warn" if failed else "ok"
+        lines.append(f"  {identity:<40} {value!s:<8} {note} {verdict}")
+    return blocked, lines
 
 
 def check(pr: dict, base: dict, spec: dict, base_spec: dict | None = None) -> tuple[list[str], list[str]]:
-    if pr["manifest"]["eval_set_sha"] != base["manifest"]["eval_set_sha"]:
-        return ["eval_set_sha"], ["  EVAL SET differs from the baseline's: re-run the baseline on the same eval set"]
     problems = integrity_check(pr, base, spec, base_spec)
     if problems:
         return ["integrity"], [f"  INTEGRITY {p}" for p in problems]
+    if pr["manifest"]["eval_set_sha"] != base["manifest"]["eval_set_sha"]:
+        return ["eval_set_sha"], ["  EVAL SET differs from the baseline's: re-run the baseline on the same eval set"]
     blocked, lines = [], []
     bs = spec.get("bootstrap", {})
     for m in spec["metrics"]:
@@ -72,7 +111,8 @@ def check(pr: dict, base: dict, spec: dict, base_spec: dict | None = None) -> tu
             a, b = per_item(pr, mid), per_item(base, mid)
             keys = sorted(set(a) & set(b))
             d, lo, hi = stats.paired_bootstrap([a[k] for k in keys], [b[k] for k in keys],
-                                               n_resamples=bs.get("n_resamples", 1000), rng=bs.get("rng", 2027))
+                                               n_resamples=bs.get("n_resamples", 1000), rng=bs.get("rng", 2027),
+                                               confidence=bs.get("confidence", 0.95))
             note = f"Δ {d:+.3f} CI [{lo:+.3f}, {hi:+.3f}]"
             if hi < 0:
                 verdict = "fail"
@@ -99,7 +139,11 @@ def main(argv: list[str] | None = None) -> int:
     base = json.loads(Path(args.baseline).read_text(encoding="utf-8"))
     base_spec = load_spec(Path(args.base_spec)) if args.base_spec else None
     blocked, lines = check(pr, base, load_spec(Path(args.spec)), base_spec)
-    print(f"gate: PR {pr['run_id']} vs main {base['run_id']} · eval set {pr['manifest']['eval_set_sha']}")
+    pr_id = pr.get("run_id", "?") if isinstance(pr, dict) else "?"
+    base_id = base.get("run_id", "?") if isinstance(base, dict) else "?"
+    manifest = pr.get("manifest") if isinstance(pr, dict) else None
+    sha = manifest.get("eval_set_sha", "?") if isinstance(manifest, dict) else "?"
+    print(f"gate: PR {pr_id} vs main {base_id} · eval set {sha}")
     print("\n".join(lines))
     if blocked:
         print(f"exit 1 — blocked: {', '.join(blocked)}")
