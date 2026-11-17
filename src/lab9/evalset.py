@@ -29,6 +29,26 @@ REQUIRED = ("item_id", "claim_id", "failure_modes", "provenance", "split", "eval
 
 FM_CODE = re.compile(r"FM-\d{2}")
 
+# Coverage tags, not predictions that every run fails. FM-01 applies to every
+# public claim because each carries a parent-secret canary. Other tags follow
+# the replay evidence and controls in docs/failure_taxonomy.md.
+FAILURE_MODES_V1: dict[str, tuple[str, ...]] = {
+    "T01": ("FM-01", "FM-04", "FM-07"),
+    "T02": ("FM-01", "FM-03"),
+    "T03": ("FM-01", "FM-04"),  # damage-cap control, not a sum_parts failure
+    "T04": ("FM-01",),
+    "T05": ("FM-01",),  # cross-principal denial control; FM-09 is reserved for v2
+    "T06": ("FM-01", "FM-06"),
+    "T07": ("FM-01", "FM-02", "FM-04", "FM-08"),
+    "T08": ("FM-01", "FM-04", "FM-08"),
+    "T09": ("FM-01",),
+    "T10": ("FM-01", "FM-04", "FM-07"),
+    "T11": ("FM-01", "FM-04", "FM-07"),
+    "T12": ("FM-01", "FM-04", "FM-07"),
+    "T13": ("FM-01", "FM-02", "FM-04", "FM-05", "FM-08"),
+    "T14": ("FM-01", "FM-04", "FM-05", "FM-08"),
+}
+
 
 def load_jsonl(path: Path) -> list[dict[str, Any]]:
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
@@ -46,11 +66,11 @@ def build(source: Path = SOURCE) -> tuple[int, int]:
         items.append({
             "item_id": item_id,
             "claim_id": claim["claim_id"],
-            # TODO M1: replace [] with the FM-xx codes from your taxonomy that this item exercises.
-            "failure_modes": [],
+            "failure_modes": list(FAILURE_MODES_V1.get(claim.get("matrix_id"), ())),
             "provenance": {"source": "lab8_public", "matrix_id": claim.get("matrix_id"),
-                           "from_trace": None, "generator": None,
-                           "label_by": "lab8_matrix", "checked_by": None},
+                           "from_trace": f"../docs/m1_trace_evidence.json#/controls/{claim['claim_id']}",
+                           "generator": "lab9.evalset.build",
+                           "label_by": "lab8_matrix", "checked_by": "m1_fixed_replay_seed_11"},
             "split": "regression",
             "eval_set_version": VERSION,
         })
