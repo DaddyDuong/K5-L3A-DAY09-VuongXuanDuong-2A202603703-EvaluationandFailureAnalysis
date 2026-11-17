@@ -46,4 +46,5 @@ runtime được gitignore.
 Sau khi hoàn thiện grader M3, trial này nằm trong report
 `E-seeded_regression-20261117-9ddc` tại `src/reports/eval_seeded_regression.json`,
 item `E-002`, seed 11. Eval-set SHA `9ddcb92d8190`, metric spec v1.1.
-Baseline và quyết định gate M4 chưa được thực hiện trong bước M3.
+Baseline và gate M4 đã xác nhận: fixed exit 0, seeded_regression exit 1;
+xem `m4_gate_evidence.json`. Với v2, kiểm tra integrity còn đối chiếu đầy đủ item/seed và slice tags.
