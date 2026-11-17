@@ -1,4 +1,4 @@
-# Eval card — LogiX-VN refund agent, Core M0–M4
+# Eval card — LogiX-VN refund agent, M0–M7
 
 Chủ sở hữu gate: **Vương Xuân Dương**. Phạm vi: thử nghiệm offline trong bài lab,
 chưa phê duyệt triển khai cho người dùng thật.
